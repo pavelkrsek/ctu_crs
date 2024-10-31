@@ -32,8 +32,9 @@ class CRSRobot:
         irc = np.array([1000, 1000, 1000, 500, 500, 500])  # IRC per rotation of motor.
         gearing = np.array([100, 100, 100, 101, 100, 101])
         direction = np.array([1, 1, -1, -1, -1, -1])
-        deg_to_irc = irc * direction * gearing * 4 / 360  # degtoirc=1 degree in IRC
-        self._q_to_q_irc = np.deg2rad(deg_to_irc)
+        self._deg_to_irc = (
+            irc * direction * gearing * 4 / 360
+        )  # degtoirc=1 degree in IRC
 
         self._motors_ids = "ABCDEF"
 
@@ -117,22 +118,27 @@ class CRSRobot:
         self.gripper.initialize()
         self._mars.send_cmd("SPDTB:0,300\n")
 
+        self._mars.setup_coordmv(self._motors_ids)
         if home:
             self.hard_home()
             self.soft_home()
+
         self._initialized = True
 
     def _joint_values_to_irc(self, joint_values: ArrayLike) -> np.ndarray:
         """Convert joint values [rad] to IRC."""
         j = np.asarray(joint_values)
         assert j.shape == (len(self._motors_ids),), "Incorrect number of joints."
-        return np.rint(joint_values * self._q_to_q_irc)
+        irc = (
+            np.rad2deg((joint_values + self._hh_rad)) * self._deg_to_irc + self._hh_irc
+        )
+        return np.rint(irc)
 
     def _irc_to_joint_values(self, irc: ArrayLike) -> np.ndarray:
         """Convert IRC to joint values [rad]."""
         irc = np.asarray(irc)
         assert irc.shape == (len(self._motors_ids),), "Incorrect number of joints."
-        return irc / self._q_to_q_irc
+        return np.deg2rad((irc - self._hh_irc) / self._deg_to_irc) + self._hh_rad
 
     def set_speed(self, speed_irc256_ms: ArrayLike):
         """Set speed for each motor in IRC*256/msec."""
@@ -173,7 +179,6 @@ class CRSRobot:
 
     def soft_home(self):
         """Move robot to the home position using coordinated movement."""
-        self._mars.setup_coordmv(self._motors_ids) # todo: setup coordmv in init?
         self._mars.coordmv(self._joint_values_to_irc(self.q_home))
         self.wait_for_motion_stop()
 
