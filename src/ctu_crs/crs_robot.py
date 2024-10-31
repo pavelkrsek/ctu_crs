@@ -183,8 +183,8 @@ class CRSRobot:
         self.wait_for_motion_stop()
 
     def move_to_q(self, q: ArrayLike):
-        """Move robot to the given joint configuration using coordinated movement.
-        The soft_home needs to be called before to set up coordinate movements."""
+        """Move robot to the given joint configuration [rad] using coordinated movement.
+        Initialization has be called before to set up coordinate movements."""
         assert self._initialized, "You need to initialize the robot before moving it."
         assert self.in_limits(q), "Joint limits violated."
         self._mars.coordmv(self._joint_values_to_irc(q))
