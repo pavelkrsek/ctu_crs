@@ -1,0 +1,37 @@
+[project]
+name = "ctu_crs"
+version = "0.1.0"
+description = "Package to control CTU/CIIRC robots CRS93 and CRS97 via MARS control unit."
+authors = [
+    {name = "Vladimir Petrik", email = "vladimir.petrik@cvut.cz"},
+]
+dependencies = [
+    "ctu-mars-control-unit>=0.1.1",
+    "numpy>=2.1.2",
+    "pyyaml>=6.0.2",
+]
+requires-python = ">=3.10"
+readme = "README.md"
+license = {text = "BSD 3-Clause"}
+
+[tool.pdm.dev-dependencies]
+test = [
+    "pytest>=7.4.3",
+    "coverage>=7.3.2",
+]
+lint = [
+    "black>=23.10.1",
+    "ruff>=0.1.3",
+]
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm.scripts]
+test = "pytest -v tests/"
+coverage = "coverage run --source src -m pytest tests/"
+post_coverage = "coverage xml"
+ruff = "ruff check src tests examples"
+black = "black --check --diff --verbose src tests examples"
+format = "black src tests examples"
+lint = { composite = ["ruff", "black"] }
