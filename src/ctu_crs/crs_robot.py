@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 import numpy as np
+from numpy import allclose
 from numpy.typing import ArrayLike
 from ctu_mars_control_unit import MarsControlUnit
 
@@ -72,6 +73,20 @@ class CRSRobot:
         self._REGCFG = [1489, 1490, 1490, 1481, 1474, 1490]
         self._IDLEREL = 1200
         self._timeout = 200
+
+        # DH notation
+
+        self.dh_offset = np.deg2rad(np.array([0.0, -270.0, -90.0, 0.0, 0.0, 0.0]))
+        self.dh_d = [
+            self.link_lengths[0],
+            0,
+            0,
+            self.link_lengths[2],
+            0,
+            self.link_lengths[3] + self.gripper_length + self.finger_length,
+        ]
+        self.dh_a = [0, self.link_lengths[1], 0, 0, 0, 0]
+        self.dh_alpha = np.deg2rad(np.array([90.0, 0.0, 270.0, 90.0, 270.0, 0]))
 
         self._initialized = False
 
@@ -207,63 +222,181 @@ class CRSRobot:
         """Return whether the given joint configuration is in joint limits."""
         return np.all(q >= self.q_min) and np.all(q <= self.q_max)
 
-    # def fk(self, q: ArrayLike) -> tuple[float, float, float, float]:
-    #     """Compute forward kinematics for the given joint configuration @param q.
-    #     The output is (x,y,z,phi) where x,y,z are position of the end-effector w.r.t.
-    #     the base frame and phi is the orientation around z-axis of the end-effector
-    #     w.r.t. the base.
-    #     """
-    #     q = np.asarray(q)
-    #     assert q.shape == (len(self._motors_ids),), "Incorrect number of joints."
-    #     l1, l2 = self.link_lengths
-    #     x = l1 * np.cos(q[0]) + l2 * np.cos(q[0] + q[1])
-    #     y = l1 * np.sin(q[0]) + l2 * np.sin(q[0] + q[1])
-    #     z = self._z_offset + q[2]
-    #     phi = np.arctan2(np.sin(q[3]), np.cos(q[3]))
-    #     return x, y, z, phi
-    #
-    # def ik_xyz(
-    #     self, x: float, y: float, z: float = 0, q3: float = 0
-    # ) -> list[np.ndarray]:
-    #     """Compute IK s.t. the end-effector is at the given position w.r.t. the
-    #     reference frame. The last joint value is set to the given fixed value. It does
-    #     not influence solution of IK, it is just passed to the output.
-    #     Internally, :param x and :param y are used to compute first and second
-    #     (revolute) joint values. The :param z is used to compute third (prismatic) joint
-    #     value. Return all solutions that are in joint limits.
-    #     """
-    #     sols = []
-    #     bs = circle_circle_intersection(
-    #         np.zeros(2), self.link_lengths[0], [x, y], self.link_lengths[1]
-    #     )
-    #     for b in bs:
-    #         q = np.zeros(4)
-    #         q[0] = np.arctan2(*b[::-1])
-    #         rot = np.array(
-    #             [[np.cos(q[0]), -np.sin(q[0])], [np.sin(q[0]), np.cos(q[0])]]
-    #         )
-    #         d = rot.T @ (np.asarray([x, y]) - b)
-    #         q[1] = np.arctan2(*d[::-1])
-    #         q[2] = z - self._z_offset
-    #         q[3] = q3
-    #         if self.in_limits(q):
-    #             sols.append(q)
-    #     return sols
-    #
-    # def ik(
-    #     self, x: float, y: float, z: float = 0.0, phi: float = 0
-    # ) -> list[np.ndarray]:
-    #     """Compute IK s.t. the end-effector is at the given position w.r.t. the
-    #     reference frame. Internally xyz is computed by ik_xyz function for all possible
-    #     tool orientation (phi). Return all solutions that are in joint limits.
-    #     If no solution exists, return empty list.
-    #     """
-    #     phi = np.arctan2(np.sin(phi), np.cos(phi))  # normalize to [-pi,pi]
-    #     sols = self.ik_xyz(x, y, z, phi)
-    #     for k in range(1, int((self.q_max[-1] - self.q_min[-1]) / (2 * np.pi)) + 1):
-    #         for plus_minus in [-1, 1]:
-    #             q3 = phi + plus_minus * k * 2 * np.pi
-    #             if self.q_min[-1] <= q3 <= self.q_max[-1]:
-    #                 sols.extend(self.ik_xyz(x, y, z, q3))
-    #
-    #     return sols
+    @staticmethod
+    def dh_to_se3(d: float, theta: float, a: float, alpha: float) -> np.ndarray:
+        """Compute SE3 matrix from DH parameters."""
+        tz = np.eye(4)
+        tz[2, 3] = d
+        rz = np.eye(4)
+        rz[:2, :2] = np.array(
+            [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]
+        )
+        tx = np.eye(4)
+        tx[0, 3] = a
+        rx = np.eye(4)
+        rx[1:3, 1:3] = np.array(
+            [[np.cos(alpha), -np.sin(alpha)], [np.sin(alpha), np.cos(alpha)]]
+        )
+        return tz @ rz @ tx @ rx
+
+    def fk_flange_pos(self, q: ArrayLike) -> np.ndarray:
+        """Compute forward kinematics for the given joint configuration @param q.
+        Returns 3D position of the flange w.r.t. base of the robot."""
+        return (self.fk(q) @ np.array([0, 0, -self.dh_d[-1], 1]))[:3]
+
+    def fk(self, q: ArrayLike) -> np.ndarray:
+        """Compute forward kinematics for the given joint configuration @param q.
+        Returns 4x4 homogeneous transformation matrix (SE3) of the end-effector w.r.t.
+        base of the robot."""
+        pose = np.eye(4)
+        for d, a, alpha, theta, qi in zip(
+            self.dh_d, self.dh_a, self.dh_alpha, self.dh_offset, q
+        ):
+            pose = pose @ self.dh_to_se3(d, qi + theta, a, alpha)
+        return pose
+
+    def _ik_flange_pos(
+        self, flange_pos: np.ndarray, singularity_theta1=0
+    ) -> list[np.ndarray]:
+        """Solve IK for position of the flange. This implementation supports only the
+        robot configurations that are above the ground."""
+        d = self.dh_d
+        a = self.dh_a
+        b = flange_pos[2] - d[0]
+
+        if allclose(flange_pos[:2], 0):  # last link pointing up
+            max_b = d[3] + a[1]
+            if allclose(b, max_b):  # full length
+                return [np.array([singularity_theta1, 0, 0])]
+            if b > d[0]:
+                arg1 = (a[1] ** 2 + b**2 - d[3] ** 2) / (2 * a[1] * b)
+                arg2 = (a[1] ** 2 + d[3] ** 2 - b**2) / (2 * a[1] * d[3])
+                if np.abs(arg1) > 1.0 or np.abs(arg2) > 1.0:
+                    return []
+                th2 = -np.arccos(arg1)
+                th3 = np.pi - np.arccos(arg2)
+                return [
+                    np.array([singularity_theta1, th2, th3]),
+                    np.array([singularity_theta1, -th2, -th3]),
+                ]
+            return []
+
+        c = np.sqrt(b**2 + flange_pos[0] ** 2 + flange_pos[1] ** 2)
+        if allclose(c, d[3] + a[1]):  # full length
+            tmp = -np.pi / 2 + np.arcsin(b / c)
+            return [
+                np.array([np.arctan2(flange_pos[1], flange_pos[0]), tmp, 0]),
+                np.array([np.arctan2(-flange_pos[1], -flange_pos[0]), -tmp, 0]),
+            ]
+        if c >= d[3] + a[1]:
+            return []
+
+        theta2_base = (
+            np.pi / 2
+            - np.arcsin(b / c)
+            + np.arccos((a[1] ** 2 + c**2 - d[3] ** 2) / (2 * a[1] * c))
+        )
+        th2_term1 = np.atan2(np.sin(theta2_base), np.cos(theta2_base))
+
+        theta1_pos = np.arctan2(flange_pos[1], flange_pos[0])
+        theta1_neg = np.arctan2(-flange_pos[1], -flange_pos[0])
+        theta3_term1 = np.pi - np.arccos(
+            (a[1] ** 2 + d[3] ** 2 - c**2) / (2 * a[1] * d[3])
+        )
+
+        th2_term2 = (
+            -np.pi / 2
+            + np.arcsin(b / c)
+            + np.arccos((a[1] ** 2 + c**2 - d[3] ** 2) / (2 * a[1] * c))
+        )
+
+        return [
+            np.array([theta1_pos, -th2_term1, theta3_term1]),
+            np.array([theta1_neg, th2_term1, -theta3_term1]),
+            np.array([theta1_pos, th2_term2, -theta3_term1]),
+            np.array([theta1_neg, -th2_term2, theta3_term1]),
+        ]
+
+    def ik(self, pose: np.ndarray) -> list[np.ndarray]:
+        """Compute inverse kinematics for the given pose. Returns array of joint
+        configurations [rad] which can achieve the given pose."""
+
+        # X=A01*A12*A23 * [0 0 0 1]' because A34*A45*A57==R34*R45*R56 is pure rotation
+        flange_pos = pose @ np.array([0, 0, -self.dh_d[5], 1])
+        sols_q_03 = self._ik_flange_pos(flange_pos)
+
+        singularity_theta4 = 0
+
+        sols = []
+        for q_03 in sols_q_03:
+            rot_03 = self.fk(q_03)[:3, :3]
+            rot_36 = rot_03.T @ pose[:3, :3]
+
+            # Euler Z - Y Z for joints 4, 5, 6
+            P = rot_36
+            if np.isclose(P[2][2], 1):  # np.cos(theta5) == 1
+                sols.append(
+                    np.concatenate(
+                        [
+                            q_03,
+                            [
+                                singularity_theta4,
+                                0,
+                                np.arctan2(P[1][0], P[0][0]) - singularity_theta4,
+                            ],
+                        ]
+                    )
+                )
+            elif np.isclose(P[2][2], -1):  # np.cos(theta5) == -1
+                sols.append(
+                    np.concatenate(
+                        [
+                            q_03,
+                            [
+                                singularity_theta4,
+                                np.pi,
+                                np.arctan2(P[1][0], -P[0][0]) + singularity_theta4,
+                            ],
+                        ]
+                    )
+                )
+            else:  # non - degenerate
+                theta5 = np.arccos(P[2][2])
+                sols.append(
+                    np.concatenate(
+                        [
+                            q_03,
+                            [
+                                np.arctan2(
+                                    P[1][2] * np.sign(np.sin(theta5)),
+                                    P[0][2] * np.sign(np.sin(theta5)),
+                                ),
+                                -theta5,
+                                np.arctan2(
+                                    P[2][1] * np.sign(np.sin(theta5)),
+                                    -P[2][0] * np.sign(np.sin(theta5)),
+                                ),
+                            ],
+                        ]
+                    )
+                )
+                sols.append(
+                    np.concatenate(
+                        [
+                            q_03,
+                            [
+                                np.arctan2(
+                                    P[1][2] * np.sign(np.sin(-theta5)),
+                                    P[0][2] * np.sign(np.sin(-theta5)),
+                                ),
+                                theta5,
+                                np.arctan2(
+                                    P[2][1] * np.sign(np.sin(-theta5)),
+                                    -P[2][0] * np.sign(np.sin(-theta5)),
+                                ),
+                            ],
+                        ]
+                    )
+                )
+        np.random.shuffle(sols)
+        return sols
