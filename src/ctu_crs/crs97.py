@@ -10,7 +10,7 @@ from ctu_crs.crs_robot import CRSRobot
 
 
 class CRS97(CRSRobot):
-    def __init__(self, tty_dev: str | None = "/dev/ttyUSB0", baudrate: int = 19200):
+    def __init__(self, tty_dev: str | None = "/dev/mars", baudrate: int = 19200):
         yaml_path = Path(__file__).parent / "params_crs97.yaml"
         with open(yaml_path, "r") as f:
             crs_params = yaml.safe_load(f)

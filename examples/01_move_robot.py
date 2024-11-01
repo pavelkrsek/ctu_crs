@@ -5,8 +5,7 @@
 #     Author: Vladimir Petrik <vladimir.petrik@cvut.cz>
 #
 import numpy as np
-
-from ctu_crs.crs97 import CRS97
+from ctu_crs import CRS97
 
 robot = CRS97()
 robot.initialize()

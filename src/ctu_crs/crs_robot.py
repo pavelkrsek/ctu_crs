@@ -16,7 +16,7 @@ from ctu_crs.gripper import Gripper
 
 class CRSRobot:
     def __init__(
-        self, tty_dev: str | None = "/dev/ttyUSB0", baudrate: int = 19200, **crs_kwargs
+        self, tty_dev: str | None = "/dev/mars", baudrate: int = 19200, **crs_kwargs
     ):
         super().__init__()
         self._mars = (
