@@ -112,7 +112,6 @@ class CRSRobot:
          - perform hard home and soft home, if @param home is True
         """
         self._mars.sync_cmd_fifo()
-        print("Resetting motors")
         self._mars.send_cmd("PURGE:\n")
         self._mars.send_cmd("STOP:\n")
         assert self._mars.check_ready()

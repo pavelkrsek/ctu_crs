@@ -1,12 +1,12 @@
 [project]
 name = "ctu_crs"
-version = "1.0.0"
+version = "1.0.1"
 description = "Package to control CTU/CIIRC robots CRS93 and CRS97 via MARS control unit."
 authors = [
     {name = "Vladimir Petrik", email = "vladimir.petrik@cvut.cz"},
 ]
 dependencies = [
-    "ctu-mars-control-unit>=0.1.1",
+    "ctu-mars-control-unit>=0.1.3",
     "numpy>=2.1.2",
     "pyyaml>=6.0.2",
 ]
