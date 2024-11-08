@@ -41,6 +41,9 @@ class CRSRobot:
 
         self._hh_rad = np.array([0, 0, 0, 0, 0, 0])
         self._hh_irc = np.array(crs_kwargs["hh_irc"], dtype=int)
+        self._hh_sequence = []
+        if "hh_sequence" in crs_kwargs.keys():
+            self._hh_sequence = crs_kwargs["hh_sequence"]
 
         lower_bound_irc = crs_kwargs["lower_bound_irc"]
         upper_bound_irc = crs_kwargs["upper_bound_irc"]
@@ -158,7 +161,7 @@ class CRSRobot:
         """Set speed for each motor in IRC*256/msec."""
         assert len(speed_irc256_ms) == len(self._motors_ids)
         for axis, speed in zip(self._motors_ids, speed_irc256_ms):
-            self._mars.send_cmd(f"REGMS:{axis}:{np.rint(speed)}\n")
+            self._mars.send_cmd(f"REGMS{axis}:{np.rint(speed)}\n")
 
     def set_speed_relative(self, fraction: float):
         """Set speed for each motor in fraction (0-1) of maximum speed."""
@@ -172,7 +175,7 @@ class CRSRobot:
         """Set acceleration for each motor in IRC/msec."""
         assert len(acceleration_irc_ms) == len(self._motors_ids)
         for axis, acceleration in zip(self._motors_ids, acceleration_irc_ms):
-            self._mars.send_cmd(f"REGACC:{axis}:{np.rint(acceleration)}\n")
+            self._mars.send_cmd(f"REGACC{axis}:{np.rint(acceleration)}\n")
 
     def set_acceleration_relative(self, fraction: float):
         """Set acceleration for each motor in fraction (0-1) of maximum acceleration."""
@@ -187,9 +190,13 @@ class CRSRobot:
         by joint A, B, and D. The speed is reset to default value before homing."""
         self.set_speed(self._default_speed_irc256_per_ms)
         self.set_acceleration(self._default_acceleration_irc_per_ms)
-        for a in "BACDEF":
-            self._mars.send_cmd("HH" + a + ":\n")
-            self._mars.wait_ready()
+        if len(self._hh_sequence) > 0:
+            for blk in self._hh_sequence:
+                for a in blk:
+                    self._mars.send_cmd("HH" + a + ":\n")
+                self._mars.wait_ready()
+        else:
+            raise ValueError("The hard home sequence is not defined for this robot.")
 
     def soft_home(self):
         """Move robot to the home position using coordinated movement."""
