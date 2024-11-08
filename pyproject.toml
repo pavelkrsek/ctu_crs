@@ -1,6 +1,6 @@
 [project]
 name = "ctu_crs"
-version = "1.0.1"
+version = "1.0.2"
 description = "Package to control CTU/CIIRC robots CRS93 and CRS97 via MARS control unit."
 authors = [
     {name = "Vladimir Petrik", email = "vladimir.petrik@cvut.cz"},
